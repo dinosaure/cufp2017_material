@@ -1,0 +1,14 @@
+true: safe_string, bin_annot, debug, keep_locs
+<*/**>: warn_error(+1..49-48-27)
+
+<ocaml-git>: include
+<ocaml-git/*.{ml,mli,byte}>: package(lwt fpath fmt hex cstruct lru uri ocamlgraph rresult angstrom faraday farfadet)
+
+<to-html/*.{ml,mli,byte,native}>: package(tyxml cmdliner)
+
+<utils>: include
+<utils/*.{ml,mli}>: package(js_of_ocaml-lwt digestif.ocaml decompress cohttp-lwt-jsoo), \
+  package(lwt fpath fmt hex cstruct lru uri ocamlgraph rresult angstrom faraday farfadet)
+
+<http.{ml,mli,byte,native}>: package(js_of_ocaml-ppx js_of_ocaml-lwt digestif.ocaml decompress cohttp-lwt-jsoo), \
+  package(lwt fpath fmt hex cstruct lru uri ocamlgraph rresult angstrom faraday farfadet)

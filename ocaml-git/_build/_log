@@ -1,0 +1,16 @@
+### Starting build.
+# Target: blob.mli.depends, tags: { extension:mli, file:blob.mli, ocaml, ocamldep, quiet }
+ocamlfind ocamldep -modules blob.mli > blob.mli.depends
+# Target: ihash.mli.depends, tags: { extension:mli, file:ihash.mli, ocaml, ocamldep, quiet }
+ocamlfind ocamldep -modules ihash.mli > ihash.mli.depends
+# Target: s.mli.depends, tags: { extension:mli, file:s.mli, ocaml, ocamldep, quiet }
+ocamlfind ocamldep -modules s.mli > s.mli.depends
+# Target: minienc.ml.depends, tags: { extension:ml, file:minienc.ml, ocaml, ocamldep, quiet }
+ocamlfind ocamldep -modules minienc.ml > minienc.ml.depends
+# Target: minienc.cmo, tags: { byte, compile, extension:cmo, extension:ml, file:minienc.cmo, file:minienc.ml, implem, ocaml, quiet }
+ocamlfind ocamlc -c -o minienc.cmo minienc.ml
++ ocamlfind ocamlc -c -o minienc.cmo minienc.ml
+File "minienc.ml", line 135, characters 4-10:
+Error: Unbound module Fmt
+Command exited with code 2.
+# Compilation unsuccessful.
