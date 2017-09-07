@@ -11,14 +11,15 @@ end
 
 module Decoder = Smart_http.Decoder(Sha1)(Web_cohttp_lwt_jsoo)
 module Encoder = Smart_http.Encoder(Sha1)(Web_cohttp_lwt_jsoo)
-module Store   = Store.Make(Sha1)(Fpath)(Fs_lwt_jsoo.Lock)(Fs_lwt_jsoo.Make(struct let temp = Fpath.v "/tmp/" end))(Ocaml_inflate)(Ocaml_deflate)
 module Mem     = Mem.Make(Sha1)(Fpath)(Fs_lwt_jsoo.Lock)(Ocaml_inflate)(Ocaml_deflate)(Cstruct_buffer)
 module Graph   = Object_graph.Make(Mem)
+
+module PACKDecoder = Unpack.MakePACKDecoder(Sha1)(Ocaml_inflate)
 
 let default_headers =
   Web_cohttp_lwt_jsoo.HTTP.Headers.empty
 
-let root_uri = Uri.of_string "http://localhost:8080/"
+let root_uri = Uri.of_string "http://din.osau.re:8080/"
 let repository = "digestif" 
 
 let to_stream ?first = function
@@ -35,26 +36,6 @@ let to_stream ?first = function
     Lwt_stream.of_list (List.append (match first with Some x -> [ x ] | None -> []) lst)
     |> fun stream -> fun () -> Lwt_stream.get stream
 
-let string_of_kind x =
-  let open Store.PACKDecoder.P in
-
-  match x with
-  | Commit -> "commit"
-  | Blob -> "blob"
-  | Tree -> "tree"
-  | Tag -> "tag"
-  | _ -> assert false
-
-let ctx_of_state state =
-  let length = Store.PACKDecoder.P.length state in
-  let kind = string_of_kind (Store.PACKDecoder.P.kind state) in
-
-  let ctx = Store.Hash.Digest.init () in
-  let hdr = Fmt.strf "%s %d\000" kind length in
-
-  Store.Hash.Digest.feed ctx (Cstruct.of_string hdr);
-  ctx
-
 let cstruct_copy cs =
   let ln = Cstruct.len cs in
   let rs = Cstruct.create ln in
@@ -65,25 +46,25 @@ let cstruct_copy cs =
 let option_map a f = match a with Some a -> Some (f a) | None -> None
 
 let apply hunks_decr hunks base raw =
-  if Cstruct.len raw < hunks_decr.Store.PACKDecoder.P.H.target_length
+  if Cstruct.len raw < hunks_decr.PACKDecoder.H.target_length
   then raise (Invalid_argument "apply");
 
   let target_length =
     List.fold_left
       (fun acc -> function
-        | Store.PACKDecoder.P.H.Insert insert ->
+        | PACKDecoder.H.Insert insert ->
           Cstruct.blit insert 0 raw acc (Cstruct.len insert); acc + Cstruct.len insert
-        | Store.PACKDecoder.P.H.Copy (off, len) ->
+        | PACKDecoder.H.Copy (off, len) ->
           Cstruct.blit base off raw acc len; acc + len)
       0 hunks
   in
 
-  if (target_length = hunks_decr.Store.PACKDecoder.P.H.target_length)
+  if (target_length = hunks_decr.PACKDecoder.H.target_length)
   then Ok raw
   else Error "Bad undelta-ification"
 
 let k2k x =
-  let open Store.PACKDecoder.P in
+  let open PACKDecoder in
   match x with
   | Commit -> `Commit
   | Tree -> `Tree
@@ -101,53 +82,53 @@ let populate git stream =
   let open Lwt.Infix in
 
   let rec go ~revidx ?(src = empty) ?ctx ?hunks state =
-    match Store.PACKDecoder.P.eval src state with
+    match PACKDecoder.eval src state with
     | `Await state ->
       (stream () >>= function
         | Some s ->
           let src = Cstruct.of_string s in
-          Lwt.return (`Jump (fun () -> (go[@tailcall]) ~revidx ~src (Store.PACKDecoder.P.refill 0 (Cstruct.len src) state)))
+          Lwt.return (`Jump (fun () -> (go[@tailcall]) ~revidx ~src (PACKDecoder.refill 0 (Cstruct.len src) state)))
         | None -> Lwt.return (`Error "PACK Err: expected input."))
     | `End (state, hash) ->
       Lwt.return `End
     | `Error (t, err) ->
-      Lwt.return (`Error (Fmt.strf "PACK Err: %a." Store.PACKDecoder.P.pp_error err))
+      Lwt.return (`Error (Fmt.strf "PACK Err: %a." PACKDecoder.pp_error err))
     | `Flush state ->
-      let o, n = Store.PACKDecoder.P.output state in
+      let o, n = PACKDecoder.output state in
 
       Cstruct_buffer.add buffer (Cstruct.sub o 0 n);
-      Lwt.return (`Jump (fun () -> (go[@tailcall]) ~revidx ~src (Store.PACKDecoder.P.flush 0 (Cstruct.len o) state)))
+      Lwt.return (`Jump (fun () -> (go[@tailcall]) ~revidx ~src (PACKDecoder.flush 0 (Cstruct.len o) state)))
     | `Hunk (state, hunk) ->
       let hunks = match hunks, hunk with
-        | Some hunks, Store.PACKDecoder.P.H.Insert raw ->
+        | Some hunks, PACKDecoder.H.Insert raw ->
           let raw' = cstruct_copy raw in
-          (Store.PACKDecoder.P.H.Insert raw' :: hunks)
+          (PACKDecoder.H.Insert raw' :: hunks)
         | Some hunks, hunk -> (hunk :: hunks)
-        | None, Store.PACKDecoder.P.H.Insert raw ->
+        | None, PACKDecoder.H.Insert raw ->
           let raw' = cstruct_copy raw in 
-          [ Store.PACKDecoder.P.H.Insert raw' ]
+          [ PACKDecoder.H.Insert raw' ]
         | None, hunk -> [ hunk ]
       in
 
-      Lwt.return (`Jump (fun () -> (go[@tailcall]) ~revidx ~src ~hunks (Store.PACKDecoder.P.continue state)))
+      Lwt.return (`Jump (fun () -> (go[@tailcall]) ~revidx ~src ~hunks (PACKDecoder.continue state)))
     | `Object state ->
-      (match Store.PACKDecoder.P.kind state with
-       | (Store.PACKDecoder.P.Commit
-         | Store.PACKDecoder.P.Tag
-         | Store.PACKDecoder.P.Tree
-         | Store.PACKDecoder.P.Blob) as kind ->
+      (match PACKDecoder.kind state with
+       | (PACKDecoder.Commit
+         | PACKDecoder.Tag
+         | PACKDecoder.Tree
+         | PACKDecoder.Blob) as kind ->
 
          let raw = Cstruct_buffer.contents buffer|> Cstruct.of_string in
          Cstruct_buffer.clear buffer;
 
          Mem.write_inflated git ~kind:(k2k kind) raw >|= fun hash -> Some hash
-       | Store.PACKDecoder.P.Hunk hunks_descr ->
+       | PACKDecoder.Hunk hunks_descr ->
            let hunks = begin[@warning "-8"] let Some hunks = option_map hunks List.rev in hunks end in
-           let res = Cstruct.create (hunks_descr.Store.PACKDecoder.P.H.target_length) in
-           let hash_base = match hunks_descr.Store.PACKDecoder.P.H.reference with
-             | Store.PACKDecoder.P.H.Hash hash -> hash
-             | Store.PACKDecoder.P.H.Offset off ->
-               let off = Int64.sub (Store.PACKDecoder.P.offset state) off in
+           let res = Cstruct.create (hunks_descr.PACKDecoder.H.target_length) in
+           let hash_base = match hunks_descr.PACKDecoder.H.reference with
+             | PACKDecoder.H.Hash hash -> hash
+             | PACKDecoder.H.Offset off ->
+               let off = Int64.sub (PACKDecoder.offset state) off in
                Revidx.find off revidx
            in
 
@@ -164,11 +145,11 @@ let populate git stream =
       >>= fun hash_opt ->
       let revidx = match hash_opt with
         | Some hash ->
-          Revidx.add (Store.PACKDecoder.P.offset state) hash revidx
+          Revidx.add (PACKDecoder.offset state) hash revidx
         | None -> revidx
       in
 
-      Lwt.return (`Jump (fun () -> (go[@tailcall]) ~revidx ~src (Store.PACKDecoder.P.next_object state)))
+      Lwt.return (`Jump (fun () -> (go[@tailcall]) ~revidx ~src (PACKDecoder.next_object state)))
   in
 
   let rec gogo () = match Queue.pop queue with
@@ -188,7 +169,7 @@ let populate git stream =
   in
 
   let ztmp = Cstruct.create 0x800 in
-  let window = Store.Inflate.window () in
+  let window = PACKDecoder.Inflate.window () in
 
   (* XXX(dinosaure): this hack is to avoid a stack-overflow in
      JS. Indeed, JS does not apply the tail-call optimization. *)
@@ -207,7 +188,7 @@ let populate git stream =
     | `Error err -> Lwt.return (Error err)
   in
 
-  go ~revidx:Revidx.empty (Store.PACKDecoder.P.default ztmp window)
+  go ~revidx:Revidx.empty (PACKDecoder.default ztmp window)
   >>= trampoline
   >>= function
   | Error _ as err -> Lwt.return err
@@ -240,7 +221,7 @@ let main () =
   Decoder.decode resp (Decoder.smart_reply ~service:"git-upload-pack" ()) >>= function
   | Error err -> Format.printf "Err: %s.\n%!" err; Lwt.return ()
   | Ok v ->
-    let (head, _, _) = List.find (fun (hash, refname, _) -> Store.Reference.(equal (of_string refname) head)) v.Decoder.refs in
+    let (head, _, _) = List.find (fun (hash, refname, _) -> Mem.Reference.(equal (of_string refname) head)) v.Decoder.refs in
     Format.printf "remote HEAD: %a.\n%!" (Fmt.hvbox Sha1.pp) head;
     let req =
       Web_cohttp_lwt_jsoo.Request.v `POST
@@ -288,8 +269,8 @@ let main () =
             Graph.K.fold_edges
               (fun source target links ->
                  object%js
-                   val source = Js.string (Store.Hash.to_hex source)
-                   val target = Js.string (Store.Hash.to_hex target)
+                   val source = Js.string (Mem.Hash.to_hex source)
+                   val target = Js.string (Mem.Hash.to_hex target)
                  end :: links) graph [] in
           Lwt_list.fold_left_s (fun acc hash ->
               Mem.read git hash >>= function
@@ -300,7 +281,7 @@ let main () =
                 | Mem.Value.Commit _ ->
                   Lwt.return
                     (object%js
-                      val id = Js.string (Store.Hash.to_hex hash)
+                      val id = Js.string (Mem.Hash.to_hex hash)
                       val group = 0
                     end :: acc)
                 | _ -> Lwt.return acc)
