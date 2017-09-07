@@ -245,6 +245,14 @@ let main () =
 
     go req >>= fun () ->
     Format.printf "Launch POST request.\n%!";
+
+    Cohttp_lwt_xhr.Client.call
+      ~headers:(Web_cohttp_lwt_jsoo.Request.headers req)
+      ~body:(`Stream body)
+      ~chunked:true (Web_cohttp_lwt_jsoo.Request.meth req) (Web_cohttp_lwt_jsoo.Request.with_uri root_uri req)
+    >>= fun (resp, body) ->
+    let resp = Web_cohttp_lwt_jsoo.{ resp; body; } in
+
     Lwt.return ()
 
 let () = Lwt.async main
