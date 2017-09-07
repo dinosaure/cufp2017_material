@@ -10,5 +10,5 @@ true: safe_string, bin_annot, debug, keep_locs
 <utils/*.{ml,mli}>: package(js_of_ocaml-lwt digestif.ocaml decompress cohttp-lwt-jsoo), \
   package(lwt fpath fmt hex cstruct lru uri ocamlgraph rresult angstrom faraday farfadet)
 
-<http.{ml,mli,byte,native}>: package(js_of_ocaml-ppx js_of_ocaml-lwt digestif.ocaml decompress cohttp-lwt-jsoo), \
+<*.{ml,mli,byte,native}>: package(js_of_ocaml-ppx js_of_ocaml-lwt digestif.ocaml decompress cohttp-lwt-jsoo), \
   package(lwt fpath fmt hex cstruct lru uri ocamlgraph rresult angstrom faraday farfadet)
